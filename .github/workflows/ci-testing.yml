@@ -41,16 +41,18 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install deps (psql client + python deps)
+      - name: Install system libs + Python deps (all requirements*.txt)
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          # libpq-dev + gcc help when packages compile against PostgreSQL
+          sudo apt-get install -y postgresql-client libpq-dev gcc
           pip install --upgrade pip
-          for req in backend/*/requirements.txt; do
-            echo "Installing $req"
-            pip install -r "$req"
-          done
-          # common test tools frequently needed by FastAPI tests
+          # install *all* requirement files, including ones with spaces in the name
+          find backend -maxdepth 2 -type f -iname "requirements*.txt" -print0 | \
+            xargs -0 -I {} sh -c 'echo "Installing: {}"; pip install -r "{}"'
+          # common test tools for FastAPI-style tests
           pip install pytest httpx pytest-asyncio
 
       - name: Create test databases
@@ -68,6 +70,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/product_db
+          PYTHONPATH: .
         run: pytest -q
 
       - name: Test order_service
@@ -79,6 +82,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/order_db
+          PYTHONPATH: .
         run: pytest -q
 
       - name: Test customer_service
@@ -90,6 +94,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/customer_db
+          PYTHONPATH: .
         run: pytest -q
 
   build_and_push:
