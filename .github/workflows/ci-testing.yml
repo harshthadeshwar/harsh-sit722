@@ -1,0 +1,107 @@
+name: stage-1-2 (testing) tests→build→ACR→ephemeral-staging
+
+on:
+  push:
+    branches: [ "testing" ]
+
+env:
+  REGISTRY: harshsit722acr.azurecr.io
+  IMAGE_TAG: testing-${{ github.run_number }}
+  AZURE_RG: rg-sit722-harsh
+  LOCATION: australiaeast
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install deps (all backends)
+        run: |
+          pip install --upgrade pip
+          for req in backend/*/requirements.txt; do
+            echo "Installing $req"
+            pip install -r "$req"
+          done
+          pip install pytest
+      - name: Test product_service
+        working-directory: backend/product_service
+        run: pytest -q
+      - name: Test order_service
+        working-directory: backend/order_service
+        run: pytest -q
+      - name: Test customer_service
+        working-directory: backend/customer_service
+        run: pytest -q
+
+  build_and_push:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Docker login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+      - name: Build product_service
+        run: docker build -t $REGISTRY/product_service:${IMAGE_TAG} backend/product_service
+      - name: Build order_service
+        run: docker build -t $REGISTRY/order_service:${IMAGE_TAG} backend/order_service
+      - name: Build customer_service
+        run: docker build -t $REGISTRY/customer_service:${IMAGE_TAG} backend/customer_service
+      - name: Build frontend
+        run: docker build -t $REGISTRY/frontend:${IMAGE_TAG} .
+      - name: Push images
+        run: |
+          for IMG in product_service order_service customer_service frontend; do
+            docker push $REGISTRY/$IMG:${IMAGE_TAG}
+          done
+      - name: Tag+push frontend:latest
+        run: |
+          docker tag $REGISTRY/frontend:${IMAGE_TAG} $REGISTRY/frontend:latest
+          docker push $REGISTRY/frontend:latest
+
+  staging_verify:
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Create ephemeral ACI (product_service)
+        run: |
+          az container create \
+            -g $AZURE_RG \
+            -n prod-svc-staging-${{ github.run_number }} \
+            --image $REGISTRY/product_service:${IMAGE_TAG} \
+            --cpu 1 --memory 1 \
+            --registry-login-server $REGISTRY \
+            --registry-username ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }} \
+            --registry-password ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }} \
+            --dns-name-label prod-svc-${{ github.run_number }} \
+            --ports 80 --location $LOCATION
+      - name: Get FQDN
+        id: fqdn
+        run: |
+          for i in {1..20}; do
+            FQDN=$(az container show -g $AZURE_RG -n prod-svc-staging-${{ github.run_number }} --query ipAddress.fqdn -o tsv)
+            if [ -n "$FQDN" ]; then echo "fqdn=$FQDN" >> $GITHUB_OUTPUT; break; fi
+            sleep 10
+          done
+          echo "FQDN=${FQDN}"
+      - name: Acceptance check
+        run: |
+          sleep 10
+          curl -s -o /dev/null -w "%{http_code}\n" http://${{ steps.fqdn.outputs.fqdn }}/health | grep -E "200|204"
+      - name: Destroy staging
+        if: always()
+        run: az container delete -g $AZURE_RG -n prod-svc-staging-${{ github.run_number }} --yes
