@@ -50,7 +50,8 @@ jobs:
             echo "Installing $req"
             pip install -r "$req"
           done
-          pip install pytest
+          # common test tools frequently needed by FastAPI tests
+          pip install pytest httpx pytest-asyncio
 
       - name: Create test databases
         run: |
@@ -66,6 +67,7 @@ jobs:
           POSTGRES_DB: product_db
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/product_db
         run: pytest -q
 
       - name: Test order_service
@@ -76,6 +78,7 @@ jobs:
           POSTGRES_DB: order_db
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/order_db
         run: pytest -q
 
       - name: Test customer_service
@@ -86,6 +89,7 @@ jobs:
           POSTGRES_DB: customer_db
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/customer_db
         run: pytest -q
 
   build_and_push:
