@@ -48,7 +48,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client libpq-dev gcc
           pip install --upgrade pip
-          # install *all* requirement files (handles names with spaces)
           find backend -maxdepth 2 -type f -iname "requirements*.txt" -print0 | \
             xargs -0 -I {} sh -c 'echo "Installing: {}"; pip install -r "{}"'
           pip install pytest httpx pytest-asyncio
@@ -59,18 +58,15 @@ jobs:
           psql -h $PGHOST -U $PGUSER -c "CREATE DATABASE order_db;"
           psql -h $PGHOST -U $PGUSER -c "CREATE DATABASE customer_db;"
 
-      # ===== Product service =====
       - name: Test product_service
         working-directory: backend/product_service
         env:
-          # DB (both styles)
           POSTGRES_HOST: localhost
           POSTGRES_PORT: "5432"
           POSTGRES_DB: product_db
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/product_db
-          # Common flags to avoid network during import/startup
           ENV: TEST
           TESTING: "1"
           DISABLE_STARTUP: "1"
@@ -79,7 +75,6 @@ jobs:
           PYTHONPATH: .
         run: pytest -vv -ra -s
 
-      # ===== Order service (problematic one) =====
       - name: Test order_service
         working-directory: backend/order_service
         env:
@@ -97,7 +92,6 @@ jobs:
           PYTHONPATH: .
         run: pytest -vv -ra -s
 
-      # ===== Customer service =====
       - name: Test customer_service
         working-directory: backend/customer_service
         env:
@@ -121,10 +115,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      # Azure CLI login instead of azure/login action
+      - name: Azure CLI login
+        env:
+          APPID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          PASSWORD: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+          TENANT: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
+          SUBSCRIPTION: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+        run: |
+          az login --service-principal -u "$APPID" -p "$PASSWORD" --tenant "$TENANT"
+          az account set --subscription "$SUBSCRIPTION"
+          az account show
 
       - name: Docker login to ACR
         uses: docker/login-action@v3
@@ -137,8 +138,6 @@ jobs:
         run: docker build -t $REGISTRY/product_service:${IMAGE_TAG} backend/product_service
 
       - name: Build order_service
-        env: 
-            PRODUCT_SERVICE_URL: http://localhost:8002
         run: docker build -t $REGISTRY/order_service:${IMAGE_TAG} backend/order_service
 
       - name: Build customer_service
@@ -162,10 +161,17 @@ jobs:
     needs: build_and_push
     runs-on: ubuntu-latest
     steps:
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      # Azure CLI login again for this job
+      - name: Azure CLI login
+        env:
+          APPID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          PASSWORD: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+          TENANT: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
+          SUBSCRIPTION: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+        run: |
+          az login --service-principal -u "$APPID" -p "$PASSWORD" --tenant "$TENANT"
+          az account set --subscription "$SUBSCRIPTION"
+          az account show
 
       - name: Create ephemeral ACI (product_service)
         run: |
