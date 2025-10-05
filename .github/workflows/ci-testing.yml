@@ -137,6 +137,8 @@ jobs:
         run: docker build -t $REGISTRY/product_service:${IMAGE_TAG} backend/product_service
 
       - name: Build order_service
+        env: 
+            PRODUCT_SERVICE_URL: http://localhost:8002
         run: docker build -t $REGISTRY/order_service:${IMAGE_TAG} backend/order_service
 
       - name: Build customer_service
