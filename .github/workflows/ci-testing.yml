@@ -4,6 +4,10 @@ on:
   push:
     branches: ["testing"]
 
+# No OIDC needed because we use client secret JSON for azure/login
+permissions:
+  contents: read
+
 env:
   REGISTRY: harshsit722acr.azurecr.io
   IMAGE_TAG: testing-${{ github.run_number }}
@@ -13,6 +17,7 @@ env:
 jobs:
   tests:
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:14
@@ -26,16 +31,20 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+
     env:
       PGHOST: localhost
       PGPORT: "5432"
       PGUSER: postgres
       PGPASSWORD: postgres
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+
       - name: Install system libs + Python deps (all requirements*.txt)
         shell: bash
         run: |
@@ -43,14 +52,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client libpq-dev gcc
           pip install --upgrade pip
+          # install every requirements*.txt (handles names with spaces)
           find backend -maxdepth 2 -type f -iname "requirements*.txt" -print0 | \
             xargs -0 -I {} sh -c 'echo "Installing: {}"; pip install -r "{}"'
           pip install pytest httpx pytest-asyncio
+
       - name: Create test databases
         run: |
           psql -h $PGHOST -U $PGUSER -c "CREATE DATABASE product_db;"
           psql -h $PGHOST -U $PGUSER -c "CREATE DATABASE order_db;"
           psql -h $PGHOST -U $PGUSER -c "CREATE DATABASE customer_db;"
+
       - name: Test product_service
         working-directory: backend/product_service
         env:
@@ -67,6 +79,7 @@ jobs:
           SQLALCHEMY_SILENCE_UBER_WARNING: "1"
           PYTHONPATH: .
         run: pytest -vv -ra -s
+
       - name: Test order_service
         working-directory: backend/order_service
         env:
@@ -83,6 +96,7 @@ jobs:
           SQLALCHEMY_SILENCE_UBER_WARNING: "1"
           PYTHONPATH: .
         run: pytest -vv -ra -s
+
       - name: Test customer_service
         working-directory: backend/customer_service
         env:
@@ -106,35 +120,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 🔎 Preflight: fail fast if any required secrets are missing
-      - name: Validate Azure secrets
-        shell: bash
-        run: |
-          set -e
-          for v in AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
-            if [ -z "${!v:-}" ]; then echo "Missing required secret: $v"; exit 1; fi
-          done
-        env:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      # ✅ Azure login with explicit fields (no JSON parsing)
+      # 🔒 Azure login using client-secret JSON (no OIDC required)
       - name: Azure login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Docker login to ACR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.AZURE_CLIENT_ID }}
-          password: ${{ secrets.AZURE_CLIENT_SECRET }}
+          username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
       - name: Build product_service
         run: docker build -t $REGISTRY/product_service:${IMAGE_TAG} backend/product_service
@@ -144,11 +141,13 @@ jobs:
         run: docker build -t $REGISTRY/customer_service:${IMAGE_TAG} backend/customer_service
       - name: Build frontend
         run: docker build -t $REGISTRY/frontend:${IMAGE_TAG} .
+
       - name: Push images
         run: |
           for IMG in product_service order_service customer_service frontend; do
             docker push $REGISTRY/$IMG:${IMAGE_TAG}
           done
+
       - name: Tag+push frontend:latest
         run: |
           docker tag $REGISTRY/frontend:${IMAGE_TAG} $REGISTRY/frontend:latest
@@ -161,10 +160,7 @@ jobs:
       - name: Azure login
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Create ephemeral ACI (product_service)
         run: |
@@ -174,8 +170,8 @@ jobs:
             --image $REGISTRY/product_service:${IMAGE_TAG} \
             --cpu 1 --memory 1 \
             --registry-login-server $REGISTRY \
-            --registry-username ${{ secrets.AZURE_CLIENT_ID }} \
-            --registry-password ${{ secrets.AZURE_CLIENT_SECRET }} \
+            --registry-username ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }} \
+            --registry-password ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }} \
             --dns-name-label prod-svc-${{ github.run_number }} \
             --ports 80 --location $LOCATION
 
