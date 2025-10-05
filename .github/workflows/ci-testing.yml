@@ -140,7 +140,7 @@ jobs:
       - name: Build customer_service
         run: docker build -t $REGISTRY/customer_service:${IMAGE_TAG} backend/customer_service
       - name: Build frontend
-        run: docker build -t $REGISTRY/frontend:${IMAGE_TAG} .
+        run: docker build -t $REGISTRY/frontend:${IMAGE_TAG} -f frontend/Dockerfile frontend
 
       - name: Push images
         run: |
