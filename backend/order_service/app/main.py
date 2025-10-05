@@ -14,6 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, joinedload
 
+if "PRODUCT_SERVICE_URL" not in globals():
+    # default used only for tests; workflow also sets this via env
+    PRODUCT_SERVICE_URL = os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8002")
+
+if "CUSTOMER_SERVICE_URL" not in globals():
+    CUSTOMER_SERVICE_URL = os.getenv("CUSTOMER_SERVICE_URL", "http://localhost:8003")
+
+    
 from .db import Base, SessionLocal, engine, get_db
 from .models import Order, OrderItem
 from .schemas import (
