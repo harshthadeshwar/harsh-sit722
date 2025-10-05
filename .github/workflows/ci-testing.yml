@@ -120,8 +120,8 @@ jobs:
         env:
           APPID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
           PASSWORD: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
-          TENANT: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
-          SUBSCRIPTION: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          TENANT: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           az login --service-principal -u "$APPID" -p "$PASSWORD" --tenant "$TENANT"
           az account set --subscription "$SUBSCRIPTION"
@@ -166,8 +166,8 @@ jobs:
         env:
           APPID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
           PASSWORD: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
-          TENANT: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
-          SUBSCRIPTION: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
+          TENANT: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           az login --service-principal -u "$APPID" -p "$PASSWORD" --tenant "$TENANT"
           az account set --subscription "$SUBSCRIPTION"
